@@ -28,8 +28,9 @@ struct Cli {
     #[arg(long, value_name = "NAME")]
     device: Option<String>,
 
-    /// Master gain (0.0 - 1.0)
-    #[arg(long, value_name = "GAIN")]
+    /// Volume multiplier (1.0 = 100 %, 2.0 = 200 %, 3.5 = 350 %, …)
+    #[arg(long, value_name = "MULTIPLIER")]
+    #[arg(alias = "volume")]
     gain: Option<f32>,
 
     /// Disable repeat suppression
@@ -226,7 +227,7 @@ fn default_config_toml() -> &'static str {
 sample_rate = 48000
 channels = 1
 buffer_size = 128
-master_gain = 0.3
+master_gain = 1.0  # volume multiplier: 1.0 = 100 %
 voice_count = 8
 # preferred_device = "Speakers"
 
