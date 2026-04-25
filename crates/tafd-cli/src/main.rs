@@ -79,9 +79,27 @@ fn run() -> Result<()> {
         }
     }
 
-    // Load samples
+    // Resolve sound pack directory: config -> executable_dir/assets/sounds
+    let pack_dir = config
+        .sound_pack
+        .pack_dir
+        .clone()
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()?
+                .parent()?
+                .join("assets/sounds")
+                .canonicalize()
+                .ok()
+        })
+        .ok_or_else(|| TafdError::SoundPackLoad {
+            path: PathBuf::from("assets/sounds"),
+            reason: "Default asset directory not found".into(),
+        })?;
+    info!("Using sound pack: {}", pack_dir.display());
+
     let samples = load_samples(
-        config.sound_pack.pack_dir.as_deref(),
+        Some(&pack_dir),
         config.sound_pack.default_variation_count,
     )?;
     info!("Loaded {} samples", samples.len());
