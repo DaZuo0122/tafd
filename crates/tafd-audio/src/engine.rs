@@ -21,20 +21,39 @@ impl AudioEngine {
             device.name().unwrap_or_else(|_| "unknown".into())
         );
 
-        let supported = device
+        let default_config = device
             .default_output_config()
             .map_err(|e| TafdError::AudioEngine(e.to_string()))?;
 
-        let sample_rate = if config.sample_rate > 0 {
-            config.sample_rate
+        let requested_sample_rate = config.sample_rate;
+        let sample_rate = if requested_sample_rate > 0 {
+            let is_supported = device
+                .supported_output_configs()
+                .map_err(|e| TafdError::AudioEngine(e.to_string()))?
+                .any(|range| {
+                    range.min_sample_rate().0 <= requested_sample_rate
+                        && requested_sample_rate <= range.max_sample_rate().0
+                });
+
+            if is_supported {
+                requested_sample_rate
+            } else {
+                let fallback = default_config.sample_rate().0;
+                log::warn!(
+                    "Requested sample rate {} Hz is not supported by the device. Falling back to {} Hz.",
+                    requested_sample_rate,
+                    fallback
+                );
+                fallback
+            }
         } else {
-            supported.sample_rate().0
+            default_config.sample_rate().0
         };
 
         let channels = if config.channels > 0 {
             config.channels
         } else {
-            supported.channels()
+            default_config.channels()
         };
 
         let stream_config = StreamConfig {
