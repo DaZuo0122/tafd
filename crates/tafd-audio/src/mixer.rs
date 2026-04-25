@@ -3,7 +3,7 @@ use tafd_core::{MAX_VOICES, Sample};
 
 /// A single playback voice.
 pub struct Voice {
-    sample: Option<Arc<Sample>>,
+    sample_idx: Option<usize>,
     frame_pos: usize,
     active: bool,
     gain: f32,
@@ -12,15 +12,15 @@ pub struct Voice {
 impl Voice {
     pub const fn new() -> Self {
         Self {
-            sample: None,
+            sample_idx: None,
             frame_pos: 0,
             active: false,
             gain: 1.0,
         }
     }
 
-    pub fn trigger(&mut self, sample: Arc<Sample>, gain: f32) {
-        self.sample = Some(sample);
+    pub fn trigger(&mut self, idx: usize, gain: f32) {
+        self.sample_idx = Some(idx);
         self.frame_pos = 0;
         self.gain = gain;
         self.active = true;
@@ -31,28 +31,38 @@ impl Voice {
     }
 
     /// Mix this voice into the output buffer. Returns true if still active.
-    pub fn mix_into(&mut self, output: &mut [f32]) -> bool {
+    pub fn mix_into(&mut self, output: &mut [f32], samples: &[Arc<Sample>]) -> bool {
         if !self.active {
             return false;
         }
-        let Some(ref sample) = self.sample else {
+        let Some(idx) = self.sample_idx else {
+            self.active = false;
+            return false;
+        };
+        let Some(sample) = samples.get(idx) else {
             self.active = false;
             return false;
         };
 
         let data = sample.data.as_slice();
-        let len = data.len();
-        let gain = self.gain;
-
-        for frame in output.iter_mut() {
-            if self.frame_pos >= len {
-                self.active = false;
-                return false;
-            }
-            *frame += data[self.frame_pos] * gain;
-            self.frame_pos += 1;
+        let remaining = data.len().saturating_sub(self.frame_pos);
+        if remaining == 0 {
+            self.active = false;
+            return false;
         }
 
+        let to_mix = remaining.min(output.len());
+        let src = &data[self.frame_pos..self.frame_pos + to_mix];
+        let gain = self.gain;
+        for (out, &s) in output[..to_mix].iter_mut().zip(src.iter()) {
+            *out += s * gain;
+        }
+        self.frame_pos += to_mix;
+
+        if self.frame_pos >= data.len() {
+            self.active = false;
+            return false;
+        }
         true
     }
 }
@@ -76,29 +86,24 @@ impl Mixer {
         }
     }
 
-    /// Trigger a sample on the next voice (round-robin steal).
-    pub fn trigger(&mut self, sample: Arc<Sample>) {
-        let idx = self.next_voice % self.active_voice_count;
+    /// Trigger a sample by index on the next voice (round-robin steal).
+    pub fn trigger(&mut self, idx: usize) {
+        let voice_idx = self.next_voice % self.active_voice_count;
         self.next_voice = (self.next_voice + 1) % self.active_voice_count;
-        self.voices[idx].trigger(sample, 1.0);
+        self.voices[voice_idx].trigger(idx, 1.0);
     }
 
     /// Render mixed audio into the provided buffer.
-    pub fn render(&mut self, output: &mut [f32]) {
-        // First zero the buffer
-        for s in output.iter_mut() {
-            *s = 0.0;
-        }
+    pub fn render(&mut self, output: &mut [f32], samples: &[Arc<Sample>]) {
+        output.fill(0.0);
 
         for voice in &mut self.voices[..self.active_voice_count] {
-            voice.mix_into(output);
+            voice.mix_into(output, samples);
         }
 
-        // Apply master gain and hard clamp
         let gain = self.master_gain;
         for s in output.iter_mut() {
-            *s *= gain;
-            *s = s.clamp(-1.0, 1.0);
+            *s = (*s * gain).clamp(-1.0, 1.0);
         }
     }
 }

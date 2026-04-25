@@ -77,7 +77,8 @@ impl AudioEngine {
         };
 
         let sample_count = samples.len();
-        let samples2 = samples.clone();
+        let samples = Arc::new(samples);
+        let samples2 = Arc::clone(&samples);
 
         let mut mixer = Mixer::new(
             config.master_gain,
@@ -124,11 +125,9 @@ impl AudioEngine {
 
                     while let Some(keycode) = INPUT_QUEUE.pop() {
                         let sample_idx = (keycode as usize) % sample_count;
-                        if let Some(sample) = samples.get(sample_idx) {
-                            mixer.trigger(sample.clone());
-                        }
+                        mixer.trigger(sample_idx);
                     }
-                    mixer.render(data);
+                    mixer.render(data, &samples);
                 },
                 move |err| {
                     log::error!("Audio stream error: {}", err);
@@ -163,11 +162,9 @@ impl AudioEngine {
 
                             while let Some(keycode) = INPUT_QUEUE.pop() {
                                 let sample_idx = (keycode as usize) % sample_count;
-                                if let Some(sample) = samples2.get(sample_idx) {
-                                    mixer2.trigger(sample.clone());
-                                }
+                                mixer2.trigger(sample_idx);
                             }
-                            mixer2.render(data);
+                            mixer2.render(data, &samples2);
                         },
                         move |err| {
                             log::error!("Audio stream error: {}", err);
@@ -200,9 +197,10 @@ impl AudioEngine {
             let devices = host
                 .output_devices()
                 .map_err(|e| TafdError::AudioEngine(e.to_string()))?;
+            let name_lower = name.to_lowercase();
             for dev in devices {
                 if let Ok(dev_name) = dev.name() {
-                    if dev_name.to_lowercase().contains(&name.to_lowercase()) {
+                    if dev_name.to_lowercase().contains(&name_lower) {
                         return Ok(dev);
                     }
                 }
