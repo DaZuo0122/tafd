@@ -1,5 +1,9 @@
 # TAFD Justfile
-# Requires: cargo, just
+# Requires: cargo, just, sh
+
+set shell := ["sh", "-c"]
+
+bin := if os() == "windows" { "target/release/tafd.exe" } else { "target/release/tafd" }
 
 # Default recipe: list available recipes
 default:
@@ -15,13 +19,13 @@ build:
 
 # Create a release package directory (binary + assets)
 package: build
-    @New-Item -ItemType Directory -Force -Path package/tafd | Out-Null
-    @Copy-Item -Path target/release/tafd.exe -Destination package/tafd/ -Force
-    @Copy-Item -Path assets -Destination package/tafd/ -Recurse -Force
-    @Write-Host "Package ready in package/tafd/"
+    mkdir -p package/tafd
+    cp {{bin}} package/tafd/
+    cp -r assets package/tafd/
+    echo "Package ready in package/tafd/"
 
 # Clean build artifacts
 [confirm]
 clean:
     cargo clean
-    if (Test-Path package) { Remove-Item -Recurse -Force package }
+    rm -rf package
