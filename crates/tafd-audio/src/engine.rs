@@ -27,24 +27,34 @@ impl AudioEngine {
 
         let requested_sample_rate = config.sample_rate;
         let sample_rate = if requested_sample_rate > 0 {
-            let is_supported = device
-                .supported_output_configs()
-                .map_err(|e| TafdError::AudioEngine(e.to_string()))?
-                .any(|range| {
-                    range.min_sample_rate().0 <= requested_sample_rate
-                        && requested_sample_rate <= range.max_sample_rate().0
-                });
+            match device.supported_output_configs() {
+                Ok(mut configs) => {
+                    let is_supported = configs.any(|range| {
+                        range.min_sample_rate().0 <= requested_sample_rate
+                            && requested_sample_rate <= range.max_sample_rate().0
+                    });
 
-            if is_supported {
-                requested_sample_rate
-            } else {
-                let fallback = default_config.sample_rate().0;
-                log::warn!(
-                    "Requested sample rate {} Hz is not supported by the device. Falling back to {} Hz.",
-                    requested_sample_rate,
+                    if is_supported {
+                        requested_sample_rate
+                    } else {
+                        let fallback = default_config.sample_rate().0;
+                        log::warn!(
+                            "Requested sample rate {} Hz is not supported by the device. Falling back to {} Hz.",
+                            requested_sample_rate,
+                            fallback
+                        );
+                        fallback
+                    }
+                }
+                Err(e) => {
+                    let fallback = default_config.sample_rate().0;
+                    log::warn!(
+                        "Failed to query supported output configs ({}). Falling back to device default {} Hz.",
+                        e,
+                        fallback
+                    );
                     fallback
-                );
-                fallback
+                }
             }
         } else {
             default_config.sample_rate().0
