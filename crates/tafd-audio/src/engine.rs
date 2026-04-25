@@ -47,14 +47,31 @@ impl AudioEngine {
             },
         };
 
+        let sample_count = samples.len();
+        let samples2 = samples.clone();
+
         let mut mixer = Mixer::new(
             config.master_gain,
             config.voice_count.clamp(1, MAX_VOICES),
         );
+        let mut mixer2 = Mixer::new(
+            config.master_gain,
+            config.voice_count.clamp(1, MAX_VOICES),
+        );
+
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = shutdown.clone();
+        let shutdown_clone2 = shutdown.clone();
 
-        let sample_count = samples.len();
+        let fallback_config = if stream_config.buffer_size != BufferSize::Default {
+            Some(StreamConfig {
+                channels: stream_config.channels,
+                sample_rate: stream_config.sample_rate,
+                buffer_size: BufferSize::Default,
+            })
+        } else {
+            None
+        };
 
         let stream = device
             .build_output_stream(
@@ -76,15 +93,12 @@ impl AudioEngine {
                         }
                     }
 
-                    // Drain input queue and trigger voices
                     while let Some(keycode) = INPUT_QUEUE.pop() {
                         let sample_idx = (keycode as usize) % sample_count;
                         if let Some(sample) = samples.get(sample_idx) {
                             mixer.trigger(sample.clone());
                         }
                     }
-
-                    // Render mixed audio
                     mixer.render(data);
                 },
                 move |err| {
@@ -93,6 +107,49 @@ impl AudioEngine {
                 },
                 None,
             )
+            .or_else(|e| {
+                if let Some(ref fb_config) = fallback_config {
+                    log::warn!(
+                        "Requested buffer size rejected ({}), retrying with device default",
+                        e
+                    );
+                    device.build_output_stream(
+                        fb_config,
+                        move |data: &mut [f32], _info: &cpal::OutputCallbackInfo| {
+                            #[cfg(windows)]
+                            unsafe {
+                                use windows::Win32::System::Threading::{
+                                    GetCurrentThread, SetThreadPriority,
+                                    THREAD_PRIORITY_TIME_CRITICAL,
+                                };
+                                static PRIORITY_SET: AtomicBool = AtomicBool::new(false);
+                                if !PRIORITY_SET.load(Ordering::Relaxed) {
+                                    let _ = SetThreadPriority(
+                                        GetCurrentThread(),
+                                        THREAD_PRIORITY_TIME_CRITICAL,
+                                    );
+                                    PRIORITY_SET.store(true, Ordering::Relaxed);
+                                }
+                            }
+
+                            while let Some(keycode) = INPUT_QUEUE.pop() {
+                                let sample_idx = (keycode as usize) % sample_count;
+                                if let Some(sample) = samples2.get(sample_idx) {
+                                    mixer2.trigger(sample.clone());
+                                }
+                            }
+                            mixer2.render(data);
+                        },
+                        move |err| {
+                            log::error!("Audio stream error: {}", err);
+                            shutdown_clone2.store(true, Ordering::Relaxed);
+                        },
+                        None,
+                    )
+                } else {
+                    Err(e)
+                }
+            })
             .map_err(|e| TafdError::AudioEngine(e.to_string()))?;
 
         stream

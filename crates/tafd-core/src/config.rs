@@ -8,7 +8,7 @@ pub const MAX_VOICES: usize = 8;
 /// Default config values.
 pub const DEFAULT_SAMPLE_RATE: u32 = 48000;
 pub const DEFAULT_CHANNELS: u16 = 1;
-pub const DEFAULT_BUFFER_SIZE: u32 = 128;
+pub const DEFAULT_BUFFER_SIZE: u32 = 0;
 pub const DEFAULT_MASTER_GAIN: f32 = 0.3;
 pub const DEFAULT_VOICE_COUNT: usize = 8;
 pub const DEFAULT_SUPPRESS_REPEAT: bool = true;
