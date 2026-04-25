@@ -40,7 +40,7 @@ impl Voice {
             return false;
         };
 
-        let data = &sample.data;
+        let data = sample.data.as_slice();
         let len = data.len();
         let gain = self.gain;
 
