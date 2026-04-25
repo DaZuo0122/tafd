@@ -77,8 +77,7 @@ impl AudioEngine {
         };
 
         let sample_count = samples.len();
-        let samples = Arc::new(samples);
-        let samples2 = Arc::clone(&samples);
+        let samples2 = samples.clone();
 
         let mut mixer = Mixer::new(
             config.master_gain,
