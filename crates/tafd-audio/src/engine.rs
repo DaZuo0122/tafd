@@ -26,15 +26,42 @@ impl AudioEngine {
             .map_err(|e| TafdError::AudioEngine(e.to_string()))?;
 
         let requested_sample_rate = config.sample_rate;
-        let sample_rate = if requested_sample_rate > 0 {
-            match device.supported_output_configs() {
-                Ok(mut configs) => {
-                    let is_supported = configs.any(|range| {
-                        range.min_sample_rate().0 <= requested_sample_rate
-                            && requested_sample_rate <= range.max_sample_rate().0
-                    });
+        let requested_buffer_size = config.buffer_size;
 
-                    if is_supported {
+        let (sample_rate, buffer_size) = match device.supported_output_configs() {
+            Ok(mut configs) => {
+                let mut sample_rate_ok = requested_sample_rate == 0;
+                let mut buffer_size_ok = requested_buffer_size == 0;
+
+                for range in &mut configs {
+                    if !sample_rate_ok && requested_sample_rate > 0 {
+                        if range.min_sample_rate().0 <= requested_sample_rate
+                            && requested_sample_rate <= range.max_sample_rate().0
+                        {
+                            sample_rate_ok = true;
+                        }
+                    }
+                    if !buffer_size_ok && requested_buffer_size > 0 {
+                        match range.buffer_size() {
+                            cpal::SupportedBufferSize::Range { min, max } => {
+                                if *min <= requested_buffer_size
+                                    && requested_buffer_size <= *max
+                                {
+                                    buffer_size_ok = true;
+                                }
+                            }
+                            cpal::SupportedBufferSize::Unknown => {
+                                buffer_size_ok = true;
+                            }
+                        }
+                    }
+                    if sample_rate_ok && buffer_size_ok {
+                        break;
+                    }
+                }
+
+                let sr = if requested_sample_rate > 0 {
+                    if sample_rate_ok {
                         requested_sample_rate
                     } else {
                         let fallback = default_config.sample_rate().0;
@@ -45,19 +72,35 @@ impl AudioEngine {
                         );
                         fallback
                     }
-                }
-                Err(e) => {
-                    let fallback = default_config.sample_rate().0;
-                    log::warn!(
-                        "Failed to query supported output configs ({}). Falling back to device default {} Hz.",
-                        e,
-                        fallback
-                    );
-                    fallback
-                }
+                } else {
+                    default_config.sample_rate().0
+                };
+
+                let bs = if requested_buffer_size > 0 {
+                    if buffer_size_ok {
+                        BufferSize::Fixed(requested_buffer_size)
+                    } else {
+                        log::warn!(
+                            "Requested buffer size {} is not supported by the device. Falling back to default.",
+                            requested_buffer_size
+                        );
+                        BufferSize::Default
+                    }
+                } else {
+                    BufferSize::Default
+                };
+
+                (sr, bs)
             }
-        } else {
-            default_config.sample_rate().0
+            Err(e) => {
+                let fallback_sr = default_config.sample_rate().0;
+                log::warn!(
+                    "Failed to query supported output configs ({}). Falling back to device defaults (sample_rate={} Hz, buffer_size=default).",
+                    e,
+                    fallback_sr
+                );
+                (fallback_sr, BufferSize::Default)
+            }
         };
 
         let channels = if config.channels > 0 {
@@ -69,11 +112,7 @@ impl AudioEngine {
         let stream_config = StreamConfig {
             channels,
             sample_rate: SampleRate(sample_rate),
-            buffer_size: if config.buffer_size > 0 {
-                BufferSize::Fixed(config.buffer_size)
-            } else {
-                BufferSize::Default
-            },
+            buffer_size,
         };
 
         let sample_count = samples.len();
