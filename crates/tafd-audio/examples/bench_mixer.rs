@@ -9,6 +9,11 @@
 //! by copying the *actual* old implementation into the benchmark file.
 //!
 //! Usage: cargo run --example bench_mixer --release -p tafd-audio
+//!
+//! Measures three things:
+//!   1. trigger() cost: Arc::clone (old) vs integer copy (new)
+//!   2. mix_into() inner loop: per-frame branch (old) vs zip slice (new)
+//!   3. Full render pipeline: 8-voice polyphony
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -180,8 +185,7 @@ fn bench_render_old(label: &str, iterations: u64, sample: &Arc<OldSample>) {
         mixer.render(black_box(&mut output));
     }
     let elapsed = start.elapsed();
-    let ns = elapsed.as_nanos() as f64 / iterations as f64;
-    println!("{}: {:.1} ns/render", label, ns);
+    println!("{}: {:.1} ns/render", label, elapsed.as_nanos() as f64 / iterations as f64);
 }
 
 fn bench_render_new(label: &str, iterations: u64, samples: &[Arc<NewSample>]) {
@@ -197,8 +201,7 @@ fn bench_render_new(label: &str, iterations: u64, samples: &[Arc<NewSample>]) {
         mixer.render(black_box(&mut output), black_box(samples));
     }
     let elapsed = start.elapsed();
-    let ns = elapsed.as_nanos() as f64 / iterations as f64;
-    println!("{}: {:.1} ns/render", label, ns);
+    println!("{}: {:.1} ns/render", label, elapsed.as_nanos() as f64 / iterations as f64);
 }
 
 fn bench_callback_old(label: &str, iterations: u64, sample: &Arc<OldSample>) {
@@ -231,6 +234,48 @@ fn bench_callback_new(label: &str, iterations: u64, samples: &[Arc<NewSample>]) 
     let elapsed = start.elapsed();
     let ns = elapsed.as_nanos() as f64 / iterations as f64;
     println!("{}: {:.1} ns/callback", label, ns);
+}
+
+fn bench_render_8v_old(label: &str, iterations: u64, sample: &Arc<OldSample>) {
+    let mut mixer = OldMixer::new(0.8, 8);
+    let mut output = vec![0f32; BUFFER_SIZE];
+    for _ in 0..8 {
+        mixer.trigger(sample.clone());
+    }
+
+    let start = Instant::now();
+    for i in 0..iterations {
+        if i % 100 == 0 {
+            mixer.trigger(sample.clone());
+        }
+        mixer.render(black_box(&mut output));
+    }
+    let elapsed = start.elapsed();
+    let ns = elapsed.as_nanos() as f64 / iterations as f64;
+    let rps = 1_000_000_000.0 / ns;
+    let margin = rps / (SAMPLE_RATE as f64 / BUFFER_SIZE as f64);
+    println!("{}: {:.1} ns/render | {:.0}x realtime margin", label, ns, margin);
+}
+
+fn bench_render_8v_new(label: &str, iterations: u64, samples: &[Arc<NewSample>]) {
+    let mut mixer = NewMixer::new(0.8, 8);
+    let mut output = vec![0f32; BUFFER_SIZE];
+    for i in 0..8 {
+        mixer.trigger(i % samples.len());
+    }
+
+    let start = Instant::now();
+    for i in 0..iterations {
+        if i % 100 == 0 {
+            mixer.trigger((i as usize) % samples.len());
+        }
+        mixer.render(black_box(&mut output), black_box(samples));
+    }
+    let elapsed = start.elapsed();
+    let ns = elapsed.as_nanos() as f64 / iterations as f64;
+    let rps = 1_000_000_000.0 / ns;
+    let margin = rps / (SAMPLE_RATE as f64 / BUFFER_SIZE as f64);
+    println!("{}: {:.1} ns/render | {:.0}x realtime margin", label, ns, margin);
 }
 
 // ============================================================================
@@ -307,6 +352,13 @@ fn main() {
         RENDER_ITERS,
         &new_samples,
     );
+
+    // ------------------------------------------------------------------------
+    // 4. 8-voice render
+    // ------------------------------------------------------------------------
+    println!("\n--- 8-voice render ---");
+    bench_render_8v_old("OLD (8 voices, Arc-based)    ", RENDER_ITERS, &old_sample);
+    bench_render_8v_new("NEW (8 voices, index-based)  ", RENDER_ITERS, &new_samples);
 
     // ------------------------------------------------------------------------
     // Correctness checks
