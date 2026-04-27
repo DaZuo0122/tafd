@@ -49,10 +49,10 @@ fn decode_reader<R: std::io::Read>(
             let samples: std::result::Result<Vec<f32>, hound::Error> = reader.samples::<f32>().collect();
             samples
         }
-        hound::SampleFormat::Int => {
-            let samples: std::result::Result<Vec<i32>, hound::Error> = reader.samples::<i32>().collect();
-            samples.map(|v| v.into_iter().map(|s| s as f32 / i32::MAX as f32).collect())
-        }
+        hound::SampleFormat::Int => reader
+            .samples::<i32>()
+            .map(|r| r.map(|s| s as f32 / i32::MAX as f32))
+            .collect::<std::result::Result<Vec<f32>, _>>(),
     }
     .map_err(|e| TafdError::SoundPackLoad {
         path: path.to_path_buf(),
