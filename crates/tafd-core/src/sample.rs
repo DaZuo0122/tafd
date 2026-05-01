@@ -1,16 +1,12 @@
-use std::sync::Arc;
-
 /// A preloaded PCM sample: mono f32 at the configured sample rate.
 #[derive(Debug, Clone)]
 pub struct Sample {
-    pub data: Arc<Vec<f32>>,
+    pub data: Vec<f32>,
 }
 
 impl Sample {
     pub fn new(data: Vec<f32>) -> Self {
-        Self {
-            data: Arc::new(data),
-        }
+        Self { data }
     }
 
     pub fn len(&self) -> usize {

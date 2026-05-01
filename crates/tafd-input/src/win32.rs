@@ -49,10 +49,7 @@ impl super::InputBackend for Win32Input {
         };
 
         // Set global state for the hook proc
-        HOOK_STATE.with(|s| {
-            let mut state = s.borrow_mut();
-            state.suppress_repeat = suppress_repeat;
-        });
+        SUPPRESS_REPEAT.store(suppress_repeat, Ordering::Relaxed);
 
         log::info!("Windows low-level keyboard hook installed");
 
@@ -84,21 +81,7 @@ impl super::InputBackend for Win32Input {
 }
 
 // Thread-local state accessible from the hook proc
-thread_local! {
-    static HOOK_STATE: std::cell::RefCell<HookState> = std::cell::RefCell::new(HookState::new());
-}
-
-struct HookState {
-    suppress_repeat: bool,
-}
-
-impl HookState {
-    fn new() -> Self {
-        Self {
-            suppress_repeat: true,
-        }
-    }
-}
+static SUPPRESS_REPEAT: AtomicBool = AtomicBool::new(true);
 
 unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code >= 0 {
@@ -108,7 +91,7 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
         if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
             // Check repeat flag (bit 30)
             let is_repeat = (info.flags.0 & 0x4000) != 0;
-            let suppress = HOOK_STATE.with(|s| s.borrow().suppress_repeat);
+            let suppress = SUPPRESS_REPEAT.load(Ordering::Relaxed);
 
             if !is_repeat || !suppress {
                 let keycode = info.vkCode;
