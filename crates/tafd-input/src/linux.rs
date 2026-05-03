@@ -9,6 +9,15 @@ const O_RDONLY: i32 = 0;
 const O_NONBLOCK: i32 = 0x800;
 const EPOLLIN: u32 = 0x001;
 const EPOLL_CTL_ADD: i32 = 1;
+const EVTYPE_BUF_LEN: u32 = 4;
+const KEY_BITS_BUF_LEN: u32 = 96;
+const KEY_A: usize = 30;
+const KEY_Z: usize = 44;
+
+const fn eviocgbit(ev: u32, len: u32) -> libc::c_ulong {
+    // _IOC(READ=2, type='E'=0x45, nr=0x20+ev, size=len)
+    ((2_u32 << 30) | (len << 16) | (0x45 << 8) | (0x20 + ev)) as libc::c_ulong
+}
 
 #[repr(C)]
 struct input_event {
@@ -152,8 +161,17 @@ fn discover_evdev_devices() -> Result<Vec<RawFd>> {
             continue;
         }
 
+        if !has_keyboard_capability(fd) {
+            log::debug!(
+                "Skipping non-keyboard device {} (no EV_KEY alpha keys)",
+                path.display()
+            );
+            unsafe { libc::close(fd) };
+            continue;
+        }
+
         fds.push(fd);
-        log::info!("Opened input device: {}", path.display());
+        log::info!("Opened keyboard device: {}", path.display());
     }
 
     if fds.is_empty() && had_eacces {
@@ -163,6 +181,34 @@ fn discover_evdev_devices() -> Result<Vec<RawFd>> {
     }
 
     Ok(fds)
+}
+
+fn has_keyboard_capability(fd: RawFd) -> bool {
+    let mut evtype_bits: u32 = 0;
+    let ret = unsafe {
+        libc::ioctl(fd, eviocgbit(0, EVTYPE_BUF_LEN), &mut evtype_bits as *mut u32)
+    };
+    if ret < 0 {
+        return false;
+    }
+    if evtype_bits & (1 << (EV_KEY as u32)) == 0 {
+        return false;
+    }
+
+    let mut key_bits = [0u8; KEY_BITS_BUF_LEN as usize];
+    let ret = unsafe {
+        libc::ioctl(fd, eviocgbit(EV_KEY as u32, KEY_BITS_BUF_LEN), key_bits.as_mut_ptr())
+    };
+    if ret < 0 {
+        return false;
+    }
+
+    for code in KEY_A..=KEY_Z {
+        if key_bits[code / 8] & (1 << (code % 8)) != 0 {
+            return true;
+        }
+    }
+    false
 }
 
 fn read_device(fd: RawFd, suppress_repeat: bool) -> std::io::Result<()> {
